@@ -142,6 +142,43 @@ class TimestampSwitchSettingCard(SwitchSettingCard1):
         self.refreshTimestampContent()
 
 
+class WeeklyTimestampSwitchSettingCard(SwitchSettingCard1):
+    """Single-row weekly switch with a weekday selector and timestamp reset."""
+
+    def __init__(self, icon: Union[str, QIcon, FluentIconBase], title,
+                 configname: str, timestamp_configname: str,
+                 day_configname: str, parent=None):
+        super().__init__(icon, title, None, configname, parent)
+        self.timestampConfigname = timestamp_configname
+        self.dayConfigname = day_configname
+        self.comboBox = ComboBox(self)
+        for day, text in enumerate(('周一', '周二', '周三', '周四', '周五', '周六', '周日'), 1):
+            self.comboBox.addItem(tr(text), userData=day)
+
+        day = cfg.get_value(day_configname, 1)
+        self.comboBox.setCurrentIndex(day - 1 if isinstance(day, int) and 1 <= day <= 7 else 0)
+        insert_index = self.hBoxLayout.indexOf(self.switchButton)
+        self.hBoxLayout.insertWidget(insert_index, self.comboBox, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.insertSpacing(insert_index + 1, 10)
+
+        self.resetButton = PushButton(tr("重置时间"), self)
+        insert_index = self.hBoxLayout.indexOf(self.switchButton)
+        self.hBoxLayout.insertWidget(insert_index, self.resetButton, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.insertSpacing(insert_index + 1, 10)
+        self.resetButton.setEnabled(format_config_timestamp(timestamp_configname)[1])
+
+        self.comboBox.currentIndexChanged.connect(self._onDayChanged)
+        self.resetButton.clicked.connect(self._resetTimestamp)
+
+    def _onDayChanged(self, index: int):
+        if index >= 0:
+            cfg.set_value(self.dayConfigname, self.comboBox.itemData(index))
+
+    def _resetTimestamp(self):
+        cfg.set_value(self.timestampConfigname, 0)
+        self.resetButton.setEnabled(False)
+
+
 class SwitchSettingCardNotify(SettingCard):
     """ Setting card with switch button """
 
