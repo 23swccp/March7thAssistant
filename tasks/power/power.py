@@ -4,6 +4,8 @@ from module.logger import log
 from module.config import cfg
 from tasks.power.instance import Instance, RelicBagFullError
 from tasks.daily.buildtarget import BuildTarget
+from tasks.power.weekly_relic_cleanup import WeeklyRelicCleanup
+from utils.date import Date
 import time
 
 
@@ -13,6 +15,7 @@ class Power:
     @staticmethod
     def run():
         Power._relic_bag_blocked = False
+        Power.run_weekly_relic_cleanup()
         Power.preprocess()
 
         # 优先执行体力计划
@@ -47,6 +50,18 @@ class Power:
             return False
 
         log.hr("完成", 2)
+
+    @staticmethod
+    def run_weekly_relic_cleanup():
+        if (cfg.get_value("break_down_level_four_relicset", False)
+                and Date.is_weekly_day_due(
+                    cfg.get_value("weekly_relic_cleanup_timestamp", 0),
+                    cfg.get_value("weekly_relic_cleanup_day_of_week", 1),
+                    cfg.refresh_hour,
+                )):
+            if not WeeklyRelicCleanup.run():
+                raise RuntimeError("每周遗器清理未完成")
+            cfg.save_timestamp("weekly_relic_cleanup_timestamp")
 
     @staticmethod
     def execute_power_plan():

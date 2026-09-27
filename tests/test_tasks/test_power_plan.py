@@ -21,6 +21,9 @@ class FakeConfig:
         self.values[key] = value
         self.writes.append((key, value))
 
+    def save_timestamp(self, key):
+        self.writes.append((key, "now"))
+
 
 class FakeLog:
     def hr(self, *args, **kwargs):
@@ -83,6 +86,53 @@ def _load_power_module(cfg):
 
 
 class TestPowerPlanRetention(unittest.TestCase):
+    def test_weekly_cleanup_records_completion_before_power_work(self):
+        cfg = FakeConfig([], keep_plan=False)
+        cfg.values["break_down_level_four_relicset"] = True
+        cfg.refresh_hour = 4
+        module = _load_power_module(cfg)
+
+        cfg.values["weekly_relic_cleanup_day_of_week"] = 5
+        with patch.object(module.Date, "is_weekly_day_due", return_value=True) as due, patch.object(
+            module.WeeklyRelicCleanup, "run", return_value=True
+        ) as cleanup, patch.object(module.Power, "preprocess", side_effect=RuntimeError("stop")):
+            with self.assertRaisesRegex(RuntimeError, "stop"):
+                module.Power.run()
+
+        cleanup.assert_called_once_with()
+        due.assert_called_once_with(0, 5, 4)
+        self.assertEqual(cfg.writes, [("weekly_relic_cleanup_timestamp", "now")])
+
+    def test_weekly_cleanup_failure_keeps_timestamp_and_skips_power(self):
+        cfg = FakeConfig([], keep_plan=False)
+        cfg.values["break_down_level_four_relicset"] = True
+        cfg.refresh_hour = 4
+        module = _load_power_module(cfg)
+
+        with patch.object(module.Date, "is_weekly_day_due", return_value=True), patch.object(
+            module.WeeklyRelicCleanup, "run", return_value=False
+        ), patch.object(module.Power, "preprocess") as preprocess:
+            with self.assertRaisesRegex(RuntimeError, "每周遗器清理未完成"):
+                module.Power.run()
+
+        preprocess.assert_not_called()
+        self.assertEqual(cfg.writes, [])
+
+    def test_weekly_cleanup_is_skipped_after_this_weeks_run(self):
+        cfg = FakeConfig([], keep_plan=False)
+        cfg.values["break_down_level_four_relicset"] = True
+        cfg.refresh_hour = 4
+        module = _load_power_module(cfg)
+
+        with patch.object(module.Date, "is_weekly_day_due", return_value=False), patch.object(
+            module.WeeklyRelicCleanup, "run"
+        ) as cleanup, patch.object(module.Power, "preprocess", side_effect=RuntimeError("stop")):
+            with self.assertRaisesRegex(RuntimeError, "stop"):
+                module.Power.run()
+
+        cleanup.assert_not_called()
+        self.assertEqual(cfg.writes, [])
+
     def test_completed_plan_is_deleted_by_default(self):
         plan = [["侵蚀隧洞", "睿治之径", 2]]
         cfg = FakeConfig(plan, keep_plan=False)
