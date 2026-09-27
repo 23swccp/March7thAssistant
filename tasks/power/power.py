@@ -15,15 +15,7 @@ class Power:
     @staticmethod
     def run():
         Power._relic_bag_blocked = False
-        if (cfg.get_value("weekly_relic_cleanup_enable", False)
-                and Date.is_weekly_day_due(
-                    cfg.get_value("weekly_relic_cleanup_timestamp", 0),
-                    cfg.get_value("weekly_relic_cleanup_day_of_week", 1),
-                    cfg.refresh_hour,
-                )):
-            if not WeeklyRelicCleanup.run():
-                raise RuntimeError("每周遗器清理未完成")
-            cfg.save_timestamp("weekly_relic_cleanup_timestamp")
+        Power.run_weekly_relic_cleanup()
         Power.preprocess()
 
         # 优先执行体力计划
@@ -58,6 +50,18 @@ class Power:
             return False
 
         log.hr("完成", 2)
+
+    @staticmethod
+    def run_weekly_relic_cleanup():
+        if (cfg.get_value("weekly_relic_cleanup_enable", False)
+                and Date.is_weekly_day_due(
+                    cfg.get_value("weekly_relic_cleanup_timestamp", 0),
+                    cfg.get_value("weekly_relic_cleanup_day_of_week", 1),
+                    cfg.refresh_hour,
+                )):
+            if not WeeklyRelicCleanup.run():
+                raise RuntimeError("每周遗器清理未完成")
+            cfg.save_timestamp("weekly_relic_cleanup_timestamp")
 
     @staticmethod
     def execute_power_plan():
