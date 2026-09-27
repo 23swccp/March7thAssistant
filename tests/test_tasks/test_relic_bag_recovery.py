@@ -80,3 +80,29 @@ def test_skip_returns_to_main_or_stops_if_navigation_fails():
     with pytest.raises(module.RelicBagFullError) as raised:
         module.Instance.leave_full_relic_bag_screen(error)
     assert raised.value.safe_to_continue is False
+
+
+def test_echo_of_war_keeps_legacy_full_bag_flow():
+    module, relicset = _load_instance()
+    relicset.run.return_value = False
+
+    assert module.Instance.recover_full_relic_bag_legacy("历战余响", 1) is False
+
+    relicset.run.assert_called_once_with()
+    module.Base.send_notification_with_screenshot.assert_called_once()
+
+
+def test_echo_of_war_run_does_not_enable_new_recovery():
+    module, _ = _load_instance()
+    module.cfg.instance_team_enable = False
+    module.cfg.tp_before_instance = False
+
+    with patch.object(module.Instance, "prepare_instance", return_value=True), patch.object(
+        module.Instance, "start_instance", return_value=True
+    ) as start, patch.object(module.Instance, "wait_fight", return_value=True) as wait, patch.object(
+        module.Instance, "complete_run"
+    ):
+        assert module.Instance.run("历战余响", "测试关卡", 1, 1) is True
+
+    start.assert_called_once_with("历战余响", 1, None)
+    wait.assert_called_once_with(1, relic_bag_recovery_enabled=False)

@@ -40,7 +40,7 @@ class Relicset:
                 return False
             if not Relicset.prepare_break_down_relicset():
                 return False
-            return Relicset.start_break_down_relicset()
+            return Relicset.start_break_down_relicset(uncertain_result=True)
         finally:
             # 筛选失败也可能停在弹窗或分解页，必须先回到可识别的界面。
             auto.press_key('esc')
@@ -76,9 +76,12 @@ class Relicset:
         return False
 
     @staticmethod
-    def start_break_down_relicset():
+    def start_break_down_relicset(uncertain_result=False):
         if not auto.click_element(Relicset.BREAK_IMAGE, "image", 0.9, max_retries=5):
-            log.warning("未找到分解按钮，可能没有可分解的四星及以下遗器")
+            if uncertain_result:
+                log.warning("未找到分解按钮，可能没有可分解的四星及以下遗器")
+            else:
+                log.info("不存在可分解的遗器")
             return False
 
         time.sleep(1)

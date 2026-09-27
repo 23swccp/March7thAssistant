@@ -12,7 +12,6 @@ import tasks.activity as activity
 from tasks.daily.synthesis import Synthesis
 import tasks.challenge as challenge
 from tasks.power.power import Power
-from tasks.power.instance import Instance, RelicBagFullError
 from tasks.daily.tasks import Tasks
 from tasks.daily.himekotry import HimekoTry
 from tasks.weekly.echoofwar import Echoofwar
@@ -45,19 +44,13 @@ class Daily:
         activity.start()
 
         if cfg.power_enable:
-            skip_power = False
             # 优先历战余响
             if cfg.echo_of_war_enable:
                 if ignore_refresh or Date.is_next_mon_x_am(cfg.echo_of_war_timestamp, cfg.refresh_hour):
                     # 注意，这里并没有解决每天开始时间。也就是4点开始。按照真实时间进行执行
                     isoweekday = datetime.date.today().isoweekday()
                     if isoweekday >= cfg.echo_of_war_start_day_of_week:
-                        try:
-                            Echoofwar.start()
-                        except RelicBagFullError as e:
-                            Instance.leave_full_relic_bag_screen(e)
-                            log.warning(f"{e}，跳过本次清体力")
-                            skip_power = True
+                        Echoofwar.start()
                     else:
                         log.info(f"历战余响设置周{cfg.echo_of_war_start_day_of_week}后开始执行，当前为周{isoweekday}, 跳过执行")
                 else:
@@ -65,8 +58,7 @@ class Daily:
             else:
                 log.info("历战余响未开启")
 
-            if not skip_power:
-                Power.run()
+            Power.run()
         else:
             log.info("清体力未开启，跳过历战余响和清体力")
 

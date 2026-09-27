@@ -3,7 +3,7 @@ from module.automation import auto
 from module.config import cfg
 from module.logger import log
 from tasks.power.power import Power
-from tasks.power.instance import Instance, RelicBagFullError
+from tasks.power.instance import Instance
 from tasks.daily.buildtarget import BuildTarget
 import time
 
@@ -42,9 +42,6 @@ class Echoofwar:
                                     instance_name = cfg.instance_names["历战余响"]
                                 return Instance.run("历战余响", instance_name, min(reward_count, max_count), 1)
             return False
-        except RelicBagFullError as e:
-            log.warning(f"历战余响因遗器背包已满而停止：{e}")
-            raise
         except Exception as e:
             log.error(f"历战余响失败: {e}")
             return False
