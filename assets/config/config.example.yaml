@@ -116,6 +116,9 @@ build_target_use_user_instance_when_only_erosion_and_ornament: false # 当培养
 
 # 分解设置
 break_down_level_four_relicset: false # 完成侵蚀隧洞、饰品提取、历战余响和模拟宇宙后是否自动分解四星及以下遗器。true 开启，false 关闭。
+weekly_relic_cleanup_enable: false # 清体力前每周运行一次智能弃置，并分解已弃置及四星及以下遗器。默认关闭。
+weekly_relic_cleanup_day_of_week: 1 # 每周从周几开始清理遗器，1=周一，7=周日；在游戏刷新时间后执行。
+weekly_relic_cleanup_timestamp: 0 # 上次成功完成每周遗器清理的时间戳。
 
 # 队伍配置
 instance_team_enable: false # 是否在打副本时自动切换队伍。true 开启，false 关闭。
