@@ -150,6 +150,7 @@ import tasks.version.app_update as app_update_task
 from tasks.daily.daily import Daily
 from tasks.daily.fight import Fight
 from tasks.power.power import Power
+from tasks.power.instance import RelicBagFullError
 from tasks.weekly.universe import Universe
 from tasks.daily.redemption import Redemption
 from tasks.weekly.currency_wars import CurrencyWars
@@ -402,6 +403,11 @@ if __name__ == "__main__":
             sys.exit(1)
     except KeyboardInterrupt:
         log.error("发生错误: 手动强制停止")
+        pause_on_error()
+        sys.exit(1)
+    except RelicBagFullError as e:
+        # 未能返回已知界面时停止自动操作；背包满 -> 记录日志
+        log.error(f"遗器背包处理后无法安全继续：{e}")
         pause_on_error()
         sys.exit(1)
     except Exception as e:

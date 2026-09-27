@@ -2,18 +2,25 @@ from module.screen import screen
 from module.automation import auto
 from module.logger import log
 from module.config import cfg
-from tasks.power.instance import Instance
+from tasks.power.instance import Instance, RelicBagFullError
 from tasks.daily.buildtarget import BuildTarget
 import time
 
 
 class Power:
+    _relic_bag_blocked = False
+
     @staticmethod
     def run():
+        Power._relic_bag_blocked = False
         Power.preprocess()
 
         # 优先执行体力计划
         Power.execute_power_plan()
+        if Power._relic_bag_blocked:
+            Instance.leave_full_relic_bag_screen(RelicBagFullError("遗器背包仍满"))
+            log.warning("遗器背包仍满，跳过本次清体力的剩余流程")
+            return False
 
         log.hr("开始清体力", 0)
 
@@ -31,7 +38,13 @@ class Power:
             log.hr("完成", 2)
             return False
 
-        Power.process(instance_type, instance_name)
+        try:
+            Power.process(instance_type, instance_name)
+        except RelicBagFullError as e:
+            log.warning(str(e))
+            Instance.leave_full_relic_bag_screen(e)
+            log.warning("遗器背包仍满，跳过本次清体力的剩余流程")
+            return False
 
         log.hr("完成", 2)
 
@@ -58,6 +71,7 @@ class Power:
         # 执行计划
         updated_plan = []
         has_executed = False
+        navigation_failure = None
 
         for i, plan in enumerate(power_plan):
             if len(plan) != 3:
@@ -96,6 +110,21 @@ class Power:
                             updated_plan.append(remaining_plan)
                     break
 
+            except RelicBagFullError as e:
+                Power._relic_bag_blocked = True
+                completed = min(count, e.completed_attempts)
+                if completed:
+                    has_executed = True
+                remaining = count - completed
+                if remaining:
+                    updated_plan.append([instance_type, instance_name, remaining])
+                updated_plan.extend(
+                    remaining_plan for remaining_plan in power_plan[i + 1:] if len(remaining_plan) == 3
+                )
+                log.warning(f"{e}，保留当前及后续体力计划")
+                if not e.safe_to_continue:
+                    navigation_failure = e
+                break
             except Exception as e:
                 log.error(f"执行体力计划时出错: {e}，保留该计划")
                 updated_plan.append(plan)
@@ -105,6 +134,13 @@ class Power:
             log.info(f"已启用保留体力计划，共 {len(power_plan)} 项")
         else:
             cfg.set_value("power_plan", updated_plan)
+
+        if navigation_failure:
+            raise navigation_failure
+
+        if Power._relic_bag_blocked:
+            log.hr("完成", 2)
+            return False
 
         if has_executed:
             if keep_power_plan:
@@ -203,7 +239,11 @@ class Power:
             
             full_runs = attempts // attempts_per_run
             if full_runs >= 1:
-                result = Instance.run(instance_type, instance_name, attempts_per_run, full_runs)
+                try:
+                    result = Instance.run(instance_type, instance_name, attempts_per_run, full_runs)
+                except RelicBagFullError as e:
+                    e.completed_attempts += executed_attempts
+                    raise
                 if result == True:
                     executed_attempts += full_runs * attempts_per_run
                 else:
@@ -213,7 +253,11 @@ class Power:
 
             remain_attempts = attempts % attempts_per_run
             if remain_attempts >= 1:
-                result = Instance.run(instance_type, instance_name, remain_attempts, 1)
+                try:
+                    result = Instance.run(instance_type, instance_name, remain_attempts, 1)
+                except RelicBagFullError as e:
+                    e.completed_attempts += executed_attempts
+                    raise
                 if result == True:
                     executed_attempts += remain_attempts
                 else:

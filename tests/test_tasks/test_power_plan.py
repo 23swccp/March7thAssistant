@@ -44,10 +44,20 @@ def _stub_module(name, **attributes):
 
 
 def _load_power_module(cfg):
+    class FakeRelicBagFullError(RuntimeError):
+        def __init__(self, completed_attempts=0, safe_to_continue=True):
+            super().__init__("遗器背包已满")
+            self.completed_attempts = completed_attempts
+            self.safe_to_continue = safe_to_continue
+
     class FakeInstance:
         @staticmethod
         def validate_instance(instance_type, instance_name):
             return True
+
+        @staticmethod
+        def leave_full_relic_bag_screen(error):
+            pass
 
     class FakeBuildTarget:
         pass
@@ -57,7 +67,9 @@ def _load_power_module(cfg):
         "module.automation": _stub_module("module.automation", auto=object()),
         "module.logger": _stub_module("module.logger", log=FakeLog()),
         "module.config": _stub_module("module.config", cfg=cfg),
-        "tasks.power.instance": _stub_module("tasks.power.instance", Instance=FakeInstance),
+        "tasks.power.instance": _stub_module(
+            "tasks.power.instance", Instance=FakeInstance, RelicBagFullError=FakeRelicBagFullError
+        ),
         "tasks.daily.buildtarget": _stub_module("tasks.daily.buildtarget", BuildTarget=FakeBuildTarget),
     }
 
@@ -66,6 +78,7 @@ def _load_power_module(cfg):
     module = importlib.util.module_from_spec(spec)
     with patch.dict(sys.modules, stub_modules):
         spec.loader.exec_module(module)
+    module.FakeRelicBagFullError = FakeRelicBagFullError
     return module
 
 
@@ -88,6 +101,35 @@ class TestPowerPlanRetention(unittest.TestCase):
             self.assertTrue(module.Power.execute_power_plan())
         self.assertEqual(cfg.writes, [])
         self.assertEqual(cfg.get_value("power_plan"), plan)
+
+    def test_full_bag_preserves_unfinished_plan_and_skips_later_plans(self):
+        plan = [["侵蚀隧洞", "睿治之径", 3], ["拟造花萼（金）", "测试关卡", 2]]
+        cfg = FakeConfig(plan, keep_plan=False)
+        module = _load_power_module(cfg)
+
+        with patch.object(module.Power, "process", side_effect=module.FakeRelicBagFullError(completed_attempts=1)) as process:
+            module.Power.execute_power_plan()
+
+        process.assert_called_once()
+        self.assertTrue(module.Power._relic_bag_blocked)
+        self.assertEqual(cfg.get_value("power_plan"), [["侵蚀隧洞", "睿治之径", 2], plan[1]])
+
+    def test_full_bag_in_plan_skips_default_dungeon(self):
+        cfg = FakeConfig([], keep_plan=False)
+        module = _load_power_module(cfg)
+
+        def block_after_plan():
+            module.Power._relic_bag_blocked = True
+
+        with patch.object(module.Power, "preprocess"), patch.object(
+            module.Power, "execute_power_plan", side_effect=block_after_plan
+        ), patch.object(module.Instance, "leave_full_relic_bag_screen") as leave, patch.object(
+            module.Power, "process"
+        ) as process:
+            self.assertFalse(module.Power.run())
+
+        leave.assert_called_once()
+        process.assert_not_called()
 
 
 if __name__ == "__main__":
