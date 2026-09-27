@@ -133,6 +133,18 @@ class TestPowerPlanRetention(unittest.TestCase):
         cleanup.assert_not_called()
         self.assertEqual(cfg.writes, [])
 
+    def test_daily_power_stage_does_not_repeat_weekly_check(self):
+        cfg = FakeConfig([], keep_plan=False)
+        module = _load_power_module(cfg)
+
+        with patch.object(module.Power, "run_weekly_relic_cleanup") as weekly, patch.object(
+            module.Power, "preprocess", side_effect=RuntimeError("stop")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stop"):
+                module.Power.run(skip_weekly_cleanup=True)
+
+        weekly.assert_not_called()
+
     def test_completed_plan_is_deleted_by_default(self):
         plan = [["侵蚀隧洞", "睿治之径", 2]]
         cfg = FakeConfig(plan, keep_plan=False)

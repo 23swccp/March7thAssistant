@@ -13,9 +13,10 @@ class Power:
     _relic_bag_blocked = False
 
     @staticmethod
-    def run():
+    def run(skip_weekly_cleanup=False):
         Power._relic_bag_blocked = False
-        Power.run_weekly_relic_cleanup()
+        if not skip_weekly_cleanup:
+            Power.run_weekly_relic_cleanup()
         Power.preprocess()
 
         # 优先执行体力计划
