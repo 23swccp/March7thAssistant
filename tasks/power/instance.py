@@ -7,10 +7,24 @@ from tasks.base.base import Base
 from tasks.base.team import Team
 from .character import Character
 from .relicset import Relicset
+from .relic_navigation import navigate_to
 import time
 from module.localization import get_raw_instance_names
 import json
 import re
+
+
+class RelicBagFullError(RuntimeError):
+    """背包仍满或无法安全完成分解；已完成次数由上层保留。"""
+
+    def __init__(self, message, completed_attempts=0, safe_to_continue=True):
+        super().__init__(message)
+        self.completed_attempts = completed_attempts
+        self.safe_to_continue = safe_to_continue
+
+
+class RelicBagFullDetected(RuntimeError):
+    """等待战斗时再次捕获背包已满提示。"""
 
 
 class Instance:
@@ -18,6 +32,9 @@ class Instance:
     def run(instance_type, instance_name, attempts_per_run, runs, from_failure=False, runs_completed=0):
         if not Instance.validate_instance(instance_type, instance_name):
             return False
+
+        # 历战余响沿用原有流程；本次只调整清体力副本的背包满恢复。
+        bag_recovery = None if instance_type == "历战余响" else {"attempted": False, "instance_name": instance_name}
 
         # 若是任务失败后的重新运行, 则改变运行逻辑
         if from_failure:
@@ -35,12 +52,17 @@ class Instance:
         if not Instance.prepare_instance(instance_type, instance_name):
             return False
 
-        if not Instance.start_instance(instance_type, attempts_per_run):
+        if not Instance.start_instance(instance_type, attempts_per_run, bag_recovery):
             return False
 
         try:
             for i in range(runs_completed, runs):
-                fight_result = Instance.wait_fight(i + 1)
+                while True:
+                    try:
+                        fight_result = Instance.wait_fight(i + 1, relic_bag_recovery_enabled=bag_recovery is not None)
+                        break
+                    except RelicBagFullDetected:
+                        Instance.recover_full_relic_bag(instance_type, attempts_per_run, bag_recovery)
 
                 # 如果战斗失败则重新运行, 并记录成功运行次数
                 if not fight_result:
@@ -55,6 +77,9 @@ class Instance:
 
                 if i < runs - 1:
                     Instance.start_instance_again(instance_type)
+        except RelicBagFullError as e:
+            e.completed_attempts += (i - runs_completed) * attempts_per_run
+            raise
         except RuntimeError:
             return False
 
@@ -64,6 +89,65 @@ class Instance:
             log.info("副本任务完成")
 
         return True
+
+    @staticmethod
+    def recover_full_relic_bag(instance_type, attempts_per_run, bag_recovery):
+        if bag_recovery["attempted"]:
+            raise RelicBagFullError("分解后仍提示遗器背包已满，跳过本次清体力")
+        bag_recovery["attempted"] = True
+        log.warning("遗器背包已满，尝试分解四星及以下遗器")
+
+        try:
+            if not Relicset.run(replan_navigation=True):
+                raise RelicBagFullError("四星及以下遗器分解未成功，跳过本次清体力")
+            log.info("遗器分解成功，重新尝试当前副本一次")
+            if not Instance.prepare_instance(instance_type, bag_recovery["instance_name"], replan_navigation=True):
+                raise RelicBagFullError("分解后无法重新进入副本，跳过本次清体力")
+            if not Instance.start_instance(instance_type, attempts_per_run, bag_recovery):
+                raise RelicBagFullError("分解后无法开始挑战，跳过本次清体力")
+        except RelicBagFullError:
+            raise
+        except Exception as e:
+            safe_to_continue = screen.get_current_screen(autotry=False)
+            raise RelicBagFullError(
+                f"遗器分解或返回副本失败：{e}",
+                safe_to_continue=safe_to_continue,
+            ) from e
+
+    @staticmethod
+    def recover_full_relic_bag_legacy(instance_type, attempts_per_run):
+        """保留历战余响原有的背包满处理行为。"""
+        log.info("检测到背包内遗器已满，准备进行分解")
+        auto.click_element("./assets/images/zh_CN/base/confirm.png", "image", 0.9)
+        time.sleep(0.5)
+        relicset_result = Relicset.run()
+        if not relicset_result:
+            log.warning("背包已满且无可分解的低星遗器，停止任务")
+            Base.send_notification_with_screenshot(cfg.notify_template['RelicBagFull'], NotificationLevel.ERROR)
+            return False
+
+        log.info("遗器分解完成")
+        log.info("切换到指南界面")
+        screen.change_to('guide3', 3)
+        time.sleep(1)
+        instance_name = Instance.get_current_instance_name(instance_type)
+        if Instance.prepare_instance(instance_type, instance_name):
+            return Instance.start_instance(instance_type, attempts_per_run)
+        return False
+
+    @staticmethod
+    def leave_full_relic_bag_screen(error):
+        """跳过清体力前回到主界面，避免下一项任务停在队伍或背包画面。"""
+        if not error.safe_to_continue:
+            raise error
+        try:
+            navigate_to('main')
+        except Exception as e:
+            raise RelicBagFullError(
+                f"背包满后无法返回主界面：{e}",
+                completed_attempts=error.completed_attempts,
+                safe_to_continue=False,
+            ) from e
 
     @staticmethod
     def validate_instance(instance_type, instance_name):
@@ -84,8 +168,11 @@ class Instance:
         return cfg.instance_team_number
 
     @staticmethod
-    def prepare_instance(instance_type, instance_name):
-        screen.change_to('guide3')
+    def prepare_instance(instance_type, instance_name, replan_navigation=False):
+        if replan_navigation:
+            navigate_to('guide3')
+        else:
+            screen.change_to('guide3')
         time.sleep(1)
 
         instance_type_crop = (262.0 / 1920, 289.0 / 1080, 422.0 / 1920, 624.0 / 1080)
@@ -196,7 +283,7 @@ class Instance:
         return True
 
     @staticmethod
-    def start_instance(instance_type, attempts_per_run):
+    def start_instance(instance_type, attempts_per_run, bag_recovery=None):
 
         if "饰品提取" in instance_type:
             time.sleep(1)
@@ -271,32 +358,10 @@ class Instance:
                 # 检测遗器背包已满的提示
                 for _ in range(5):  # 连续快速检测5次
                     if auto.find_element("背包内遗器持有数量已达上限", "text", max_retries=1, include=True, threshold=0.7):
-                        log.info("检测到背包内遗器已满，准备进行分解")
-                        auto.click_element("./assets/images/zh_CN/base/confirm.png", "image", 0.9)
-                        time.sleep(0.5)
-                        # 执行分解四星遗器的操作
-                        relicset_result = Relicset.run()
-
-                        if not relicset_result:
-                            # 没有可分解的低星遗器，触发死循环保护，停止任务
-                            log.warning("背包已满且无可分解的低星遗器，停止任务")
-                            Base.send_notification_with_screenshot(cfg.notify_template['RelicBagFull'], NotificationLevel.ERROR)
-                            return False
-
-                        # 简化的界面恢复逻辑
-                        log.info("遗器分解完成")
-
-                        # 直接回到指南界面，减少中间步骤
-                        log.info("切换到指南界面")
-                        screen.change_to('guide3', 3)
-                        time.sleep(1)
-
-                        # 重新准备副本并开始挑战
-                        # 通过instance_type获取对应的副本名称
-                        instance_name = Instance.get_current_instance_name(instance_type)
-                        if Instance.prepare_instance(instance_type, instance_name):
-                            return Instance.start_instance(instance_type, attempts_per_run)
-                        return False
+                        if bag_recovery is None:
+                            return Instance.recover_full_relic_bag_legacy(instance_type, attempts_per_run)
+                        Instance.recover_full_relic_bag(instance_type, attempts_per_run, bag_recovery)
+                        return True
                     time.sleep(0.1)
 
                 if auto.find_element("./assets/images/purefiction/prepare_fight.png", "image", 200000, max_retries=60, crop=(0 / 1920, 0 / 1080, 300.0 / 1920, 300.0 / 1080)):
@@ -354,30 +419,10 @@ class Instance:
                     if "侵蚀隧洞" in instance_type or "历战余响" in instance_type:
                         for _ in range(5):  # 连续快速检测5次
                             if auto.find_element("背包内遗器持有数量已达上限", "text", max_retries=1, include=True, threshold=0.7):
-                                log.info("检测到背包内遗器已满，准备进行分解")
-                                auto.click_element("./assets/images/zh_CN/base/confirm.png", "image", 0.9)
-                                time.sleep(0.5)
-                                # 执行分解四星遗器的操作
-                                relicset_result = Relicset.run()
-
-                                if not relicset_result:
-                                    # 没有可分解的低星遗器，触发死循环保护，停止任务
-                                    log.warning("背包已满且无可分解的低星遗器，停止任务")
-                                    Base.send_notification_with_screenshot(cfg.notify_template['RelicBagFull'], NotificationLevel.ERROR)
-                                    return False
-
-                                # 简化的界面恢复逻辑
-                                log.info("遗器分解完成")
-
-                                log.info("切换到指南界面")
-                                screen.change_to('guide3', 3)  # 增加重试次数
-                                time.sleep(1)
-
-                                # 重新准备副本并开始挑战
-                                instance_name = Instance.get_current_instance_name(instance_type)
-                                if Instance.prepare_instance(instance_type, instance_name):
-                                    return Instance.start_instance(instance_type, attempts_per_run)
-                                return False
+                                if bag_recovery is None:
+                                    return Instance.recover_full_relic_bag_legacy(instance_type, attempts_per_run)
+                                Instance.recover_full_relic_bag(instance_type, attempts_per_run, bag_recovery)
+                                return True
                             time.sleep(0.1)
 
                     # 版本更新后不再需要开怪
@@ -410,11 +455,8 @@ class Instance:
         # 从副本返回主界面后，按esc太快无效
         time.sleep(2)
 
-        if ("侵蚀隧洞" in instance_type or "饰品提取" in instance_type or "历战余响" in instance_type) and cfg.break_down_level_four_relicset:
-            Relicset.run()
-
     @staticmethod
-    def wait_fight(num, timeout=1800):
+    def wait_fight(num, timeout=1800, relic_bag_recovery_enabled=False):
         log.info("进入战斗")
         time.sleep(5)
 
@@ -446,22 +488,18 @@ class Instance:
             # 每次战斗检测循环中进行多次快速检测
             for _ in range(3):
                 if auto.find_element("背包内遗器持有数量已达上限", "text", max_retries=1, include=True, threshold=0.7):
+                    if relic_bag_recovery_enabled:
+                        raise RelicBagFullDetected()
+
                     log.info("检测到背包内遗器已满，准备进行分解")
                     auto.click_element("./assets/images/zh_CN/base/confirm.png", "image", 0.9)
                     time.sleep(0.5)
-                    # 执行分解四星遗器的操作
                     relicset_result = Relicset.run()
-
                     if not relicset_result:
-                        # 没有可分解的低星遗器，触发死循环保护，停止任务
                         log.warning("背包已满且无可分解的低星遗器，停止任务")
                         Base.send_notification_with_screenshot(cfg.notify_template['RelicBagFull'], NotificationLevel.ERROR)
                         raise RuntimeError("背包已满且无可分解的低星遗器")
-
-                    # 简化处理：直接返回失败允许重试
                     log.info("战斗中检测到遗器已满并完成分解，返回战斗失败状态")
-
-                    # 直接返回失败，让上层逻辑处理重新开始战斗
                     return False
 
                 time.sleep(0.1)
