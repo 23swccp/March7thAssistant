@@ -4,13 +4,11 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFileDi
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import qconfig, ScrollArea, PrimaryPushButton, InfoBar, InfoBarPosition, PushButton, MessageBox
 from .common.style_sheet import StyleSheet
+from .common.icon import UiIcon
 from .tools.warp_export import warpExport, WarpExport, detect_format, uigf_to_srgf_hkrpg, srgf_to_uigf_hkrpg
 from utils import clipboard
 import json
 import os
-from openpyxl.styles import Font
-from openpyxl import Workbook
-from openpyxl.utils import get_column_letter
 from module.localization import tr
 import time
 import sys
@@ -25,10 +23,10 @@ class WarpInterface(ScrollArea):
 
         self.updateBtn = PrimaryPushButton(FIF.SYNC, tr("更新数据"), self)
         self.updateFullBtn = PushButton(FIF.SYNC, tr("更新完整数据"), self)
-        self.importBtn = PushButton(FIF.PENCIL_INK, tr("导入数据"), self)
-        self.exportBtn = PushButton(FIF.SAVE_COPY, tr("导出数据"), self)
-        self.exportExcelBtn = PushButton(FIF.SAVE_COPY, tr("导出Excel"), self)
-        self.copyLinkBtn = PushButton(FIF.SHARE, tr("复制链接"), self)
+        self.importBtn = PushButton(UiIcon.IMPORT, tr("导入数据"), self)
+        self.exportBtn = PushButton(UiIcon.EXPORT, tr("导出数据"), self)
+        self.exportExcelBtn = PushButton(UiIcon.EXPORT, tr("导出Excel"), self)
+        self.copyLinkBtn = PushButton(UiIcon.LINK, tr("复制链接"), self)
         self.clearBtn = PushButton(FIF.DELETE, tr("清空"), self)
         if sys.platform != 'win32':
             self.updateBtn.setEnabled(False)
@@ -233,6 +231,11 @@ class WarpInterface(ScrollArea):
             )
             if not path:
                 return
+
+            # 延迟导入，避免启动时加载 openpyxl
+            from openpyxl.styles import Font
+            from openpyxl import Workbook
+            from openpyxl.utils import get_column_letter
 
             records = config.get("list", [])
             gacha_map = {

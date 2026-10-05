@@ -55,7 +55,7 @@ class ExpandableSwitchSettingCard(ExpandSettingCard):
 
     def setValue(self, isChecked: bool):
         """Set switch button state"""
-        self.switchButton.setChecked(isChecked)
+        self.switchButton.setChecked(bool(isChecked))
         self.switchButton.setText(tr('开') if isChecked else tr('关'))
 
     def getSwitchState(self) -> bool:
@@ -112,6 +112,27 @@ class ExpandableSwitchSettingCard(ExpandSettingCard):
         self.expandStateChanged.emit(False)
 
 
+class ExpandableWeeklyRelicSettingCard(ExpandableSwitchSettingCard):
+    """Weekly relic cleanup switch with a weekday in the header."""
+
+    def __init__(self, configname: str, day_configname: str,
+                 icon: Union[str, QIcon, FluentIconBase], title: str, parent=None):
+        super().__init__(configname, icon, title, parent=parent)
+        self.dayConfigname = day_configname
+        self.comboBox = ComboBox(self)
+        for day, text in enumerate(('周一', '周二', '周三', '周四', '周五', '周六', '周日'), 1):
+            self.comboBox.addItem(tr(text), userData=day)
+
+        day = self.cfg.get_value(day_configname, 1)
+        self.comboBox.setCurrentIndex(day - 1 if isinstance(day, int) and 1 <= day <= 7 else 0)
+        self.insertWidgetBeforeSwitch(self.comboBox)
+        self.comboBox.currentIndexChanged.connect(self._onDayChanged)
+
+    def _onDayChanged(self, index: int):
+        if index >= 0:
+            self.cfg.set_value(self.dayConfigname, self.comboBox.itemData(index))
+
+
 class ExpandableTimestampSwitchSettingCard(ExpandSettingCard):
     """带时间副标题和重置按钮的可展开开关设置卡片"""
 
@@ -150,7 +171,7 @@ class ExpandableTimestampSwitchSettingCard(ExpandSettingCard):
         self.switchChanged.emit(isChecked)
 
     def setValue(self, isChecked: bool):
-        self.switchButton.setChecked(isChecked)
+        self.switchButton.setChecked(bool(isChecked))
         self.switchButton.setText(tr('开') if isChecked else tr('关'))
 
     def refreshTimestampContent(self):
@@ -635,7 +656,7 @@ class ExpandableSwitchSettingCardEchoofwar(ExpandSettingCard):
 
     def setValue(self, isChecked: bool):
         """设置开关状态"""
-        self.switchButton.setChecked(isChecked)
+        self.switchButton.setChecked(bool(isChecked))
         self.switchButton.setText(tr('开') if isChecked else tr('关'))
 
     def _onCurrentIndexChanged(self, index: int):
